@@ -107,6 +107,8 @@ fn example() -> Result<(), Box<Error>> {
         //println!("{}/{}", i, num_batches);
         let mut dw1 = Matrix::zeros(28 * 28, hidden_layer_nodes);
         let mut dw2 = Matrix::zeros(hidden_layer_nodes, 10);
+        let mut db1 = Matrix::zeros(hidden_layer_nodes, 1);
+        let mut db2 = Matrix::zeros(10, 1);
         for example in i * examples_per_batch..i * examples_per_batch + examples_per_batch {
             let xi = &examples.get(example).unwrap().values; // 784x1
             let a1: Matrix<f64> = (W1.transpose() * xi + &b1).apply(&sigmoid); // 16x1
@@ -116,6 +118,9 @@ fn example() -> Result<(), Box<Error>> {
 
             // dL/dw2 = dL/da2 * da2/dz2 * dz2/dw2
             let dLdW2 = &a1 * (&a2 - y).transpose(); // -> 16x10
+            // dL/db2 = dL/da2 * da2/dz2 * dz2/db2
+            //       = (a2 - a) * 1
+            db2 = db2 + (&a2 - y);
 
             let aa = &Matrix::ones(hidden_layer_nodes, 1) - &a1; // 16x1
             let da1dz1 = (&a1.elemul(&aa)); // 16x1
@@ -125,11 +130,18 @@ fn example() -> Result<(), Box<Error>> {
             let dLda1 = &W2 * dLdz2; // 16x10 * 10x1 => 16x1
             let dLdz1 = dLda1.elemul(&da1dz1); // Apply sigmoid derivative => 16x1
             let dLdW1 = xi * dLdz1.transpose(); // 784x16
+            // dL/db1 =  dL/da2 * da2/dz2 * dz2/da1 * da1/dz1 * dz1/db1
+            db1 = db1 + dLdz1;
+
+            // Update batch diff.
             dw1 = dw1 + dLdW1;
             dw2 = dw2 + dLdW2;
         }
-        W1 = W1 - dw1 * (learning_rate / examples_per_batch as f64);
-        W2 = W2 - dw2 * (learning_rate / examples_per_batch as f64);
+        let rate = learning_rate / examples_per_batch as f64;
+        W1 = W1 - dw1 * rate;
+        W2 = W2 - dw2 * rate;
+        b1 = b1 - db1 * rate;
+        b2 = b2 - db2 * rate;
     }
 
 
