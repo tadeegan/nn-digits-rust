@@ -89,7 +89,7 @@ fn example() -> Result<(), Box<Error>> {
 
     let num_training_examples = 40000;
     let examples_per_batch = 1;
-    let learning_rate = 0.005;
+    let learning_rate = 0.01;
     let hidden_layer_nodes = 20;
 
     let mut W1: Matrix<f64> = reproducible_random_matrix(28 * 28, hidden_layer_nodes); // 784x16
@@ -110,6 +110,12 @@ fn example() -> Result<(), Box<Error>> {
         let mut db1 = Matrix::zeros(hidden_layer_nodes, 1);
         let mut db2 = Matrix::zeros(10, 1);
         for example in i * examples_per_batch..i * examples_per_batch + examples_per_batch {
+            // Network structure X -> W[1] -> a[1] -> W[2] -> a[2]
+            // z[1] = W[1](T)X + b[1]
+            // a[1] = sigmoid(z[1])
+            // z[2] = W[2](T)a[1] + b[2]
+            // a[2] = sigmoid(z[2])
+            // Loss(a[2], y) = -a[2]*log(y) + (1 - y)log(1 - a[2])
             let xi = &examples.get(example).unwrap().values; // 784x1
             let a1: Matrix<f64> = (W1.transpose() * xi + &b1).apply(&sigmoid); // 16x1
             let a2 = (W2.transpose() * &a1 + &b2).apply(&sigmoid); // 10x1
