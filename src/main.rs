@@ -1,5 +1,6 @@
 extern crate csv;
 extern crate rulinalg;
+extern crate rand;
 
 use std::error::Error;
 use std::io;
@@ -9,6 +10,16 @@ use std::f64::consts::E;
 use rulinalg::matrix::Matrix;
 use rulinalg::matrix::BaseMatrixMut;
 use rulinalg::matrix::BaseMatrix;
+
+use rand::{Rng, SeedableRng};
+
+pub fn reproducible_random_matrix(rows: usize, cols: usize) -> Matrix<f64> {
+    const STANDARD_SEED: [usize; 4] = [12, 2049, 4000, 33];
+    let mut rng = rand::StdRng::from_seed(&STANDARD_SEED);
+    let elements: Vec<_> = rng.gen_iter::<f64>().take(rows * cols).map(|n| (n - 0.5) / 100.0).collect();
+    println!("elements: {:?}", elements);
+    Matrix::new(rows, cols, elements)
+}
 
 struct Example {
     label_value: u32,
@@ -35,14 +46,6 @@ fn sigmoid(x : f64) -> f64 {
 
 fn print_dim(m : &Matrix<f64>) {
     println!("({},{})", m.rows(), m.cols());
-}
-
-fn compute_gradient(W: &Matrix<f64>, xi : &Matrix<f64>, b: &Matrix<f64>, y: &Matrix<f64>) -> Matrix<f64> {
-    let z : Matrix<f64> = W.transpose() * xi + b;
-    // activation.
-    let a = z.apply(&sigmoid);
-    // This transpose seems weird.
-    xi * (a - y).transpose()
 }
 
 
@@ -83,25 +86,38 @@ fn example() -> Result<(), Box<Error>> {
 
     let batch_size = 20000;
     let learning_rate = 0.005;
-    let mut W : Matrix<f64> = Matrix::zeros(28*28, 10);
-    let mut b : Matrix<f64> = Matrix::zeros(10, 1);
-    let mut dJ_dw : Matrix<f64> = Matrix::zeros(28*28, 10);
-    let mut dJ_db : Matrix<f64> = Matrix::zeros(28*28, 10);
+    let hidden_layer_nodes = 16;
+
+    let mut W1 : Matrix<f64> = reproducible_random_matrix(28*28, hidden_layer_nodes); // 784x16
+    let mut W2 : Matrix<f64> = reproducible_random_matrix(hidden_layer_nodes, 10); // 16x10
+
+    let mut b1 : Matrix<f64> = Matrix::zeros(hidden_layer_nodes, 1);
+    let mut b2 : Matrix<f64> = Matrix::zeros(10, 1);
+
+    let mut dJ_dw1 : Matrix<f64> = Matrix::zeros(28*28, 10);
+    let mut dJ_dw2 : Matrix<f64> = Matrix::zeros(28*28, 10);
 
     for i in 0..batch_size {
-        let xi = &examples.get(i).unwrap().values;
-        let yhat = (W.transpose() * xi + &b).apply(&sigmoid);
-        let y = &examples.get(i).unwrap().label;
-        let loss = loss(&yhat, y);
+        let xi = &examples.get(i).unwrap().values; // 784x1
+        let a1 : Matrix<f64> = (W1.transpose() * xi + &b1).apply(&sigmoid); // 16x1
+        let a2 = (W2.transpose() * &a1 + &b2).apply(&sigmoid); // 10x1
+        let y = &examples.get(i).unwrap().label; // 10x1
+        let loss = loss(&a2, y); // 10x1
 
-//        println!("y {}", y);
-//        println!("yhat {}", yhat);
-//        println!("b {}", b);
-//        println!("loss sum: {}", loss.sum());
-//        println!("loss: {}", loss);
+        // dL/dw2 = dL/da2 * da2/dz2 * dz2/dw2
+        let dLdW2 = &a1 * (&a2 - y).transpose(); // -> 16x10
 
-        let grad = compute_gradient(&W, xi, &b, y);
-        W = W - grad * learning_rate;
+        let aa = &Matrix::ones(hidden_layer_nodes, 1) - &a1; // 16x1
+        let da1dz1 = (&a1.elemul(&aa)); // 16x1
+        // dL/dw1 = dL/da2 * da2/dz2 * dz2/da1 * da1/dz1 * dz1/dW1
+        // Assume sigmoid in hidden layer: dsig/dx(x) = sig(x) * (1-sig(x))
+        let dLdz2 = (&a2 - y); // 10x1
+        let dLda1 = &W2 * dLdz2; // 16x10 * 10x1 => 16x1
+        let dLdz1 = dLda1.elemul(&da1dz1); // Apply sigmoid derivative => 16x1
+        let dLdW1 = xi * dLdz1.transpose(); // 784x16
+
+        W1 = W1 - dLdW1 * learning_rate;
+        W2 = W2 - dLdW2 * learning_rate;
     }
 
     let mut num_correct = 0;
@@ -111,12 +127,13 @@ fn example() -> Result<(), Box<Error>> {
         let example = examples.get(i).unwrap();
 
         let xi = &example.values;
-        let yhat : Matrix<f64> = (W.transpose() * xi + &b).apply(&sigmoid);
+        let a1 = (W1.transpose() * xi + &b1).apply(&sigmoid);
+        let a2 = (W2.transpose() * a1 + &b2).apply(&sigmoid); // yhat
 
         let mut label : u32 = 0;
         let mut highest_confidence = 0.0;
         for i in 0..10 {
-            let confidence = yhat[[i, 0]];
+            let confidence = a2[[i, 0]];
             if confidence > highest_confidence {
                 highest_confidence = confidence;
                 label = i as u32;
